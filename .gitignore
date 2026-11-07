@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+.inspect/
+*cookies*.txt
+capybarabr.txt
+*.log
+chat-novo.txt
+.env
+.env.*
+!.env.example
+data/
+*.db
+*.sqlite
+*.sqlite3

@@ -1,0 +1,6 @@
+httpx>=0.28,<0.29
+beautifulsoup4>=4.14,<5
+aiohttp>=3.13,<4
+# O site utiliza Engine.IO 3 / Socket.IO 2, não o protocolo mais recente.
+python-socketio==4.6.1
+python-engineio==3.14.2

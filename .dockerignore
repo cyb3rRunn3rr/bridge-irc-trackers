@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+__pycache__
+tests
+*.py[cod]
+*.log
+*.db
+*.sqlite*
+*.env
+*.env.*
+!*.env.example
+*cookies*.txt
+capybarabr.txt
+chat-novo.txt
+data

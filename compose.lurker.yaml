@@ -1,0 +1,32 @@
+services:
+  lurker:
+    image: ghcr.io/amiantos/lurker:latest
+    container_name: lurker
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8015:8015"
+    volumes:
+      - ./data:/app/data
+    environment:
+      NODE_ENV: production
+      PORT: "8015"
+      DATABASE_PATH: /app/data/lurker.db
+    depends_on:
+      - capybara-bridge
+
+  capybara-bridge:
+    image: ghcr.io/cyb3rrunn3rr/capybara-irc-bridge:latest
+    container_name: capybara-irc-bridge
+    restart: unless-stopped
+    command:
+      - "--cookies"
+      - "/run/secrets/capybarabr.txt"
+      - "--bind"
+      - "0.0.0.0"
+      - "--sticker-base-url"
+      - "http://capybara-bridge:6668"
+    volumes:
+      - ${CAPYBARA_COOKIES:-../capybara-irc-bridge/capybarabr.txt}:/run/secrets/capybarabr.txt:ro
+    expose:
+      - "6667"
+      - "6668"
