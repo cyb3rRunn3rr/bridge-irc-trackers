@@ -1,0 +1,16 @@
+[servers.CapybaraBR]
+server = "127.0.0.1"
+port = 6667
+use_tls = false
+nickname = "seu_user_igual_do_site"
+channels = ["#capybarabr"]
+
+[servers.CapybaraBR.typing]
+show = true
+share = true
+
+# Configuração global de exibição; mescle com [display] se já existir.
+[display]
+nickname = ["color"]
+nicklist_nickname = ["color"]
+adapt_metadata_colors = "none"

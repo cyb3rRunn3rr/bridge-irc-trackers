@@ -1,4 +1,4 @@
-"""Cliente do chat UNIT3D observado no CapybaraBR."""
+"""Cliente dos chats UNIT3D usados pelos bridges de trackers."""
 
 import asyncio
 import http.cookiejar
@@ -8,7 +8,7 @@ import re
 import time
 import unicodedata
 from collections import OrderedDict
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin
 
 import httpx
 import socketio
@@ -91,6 +91,7 @@ class SiteChat:
         )
         self.user = {}
         self.ws_host = ""
+        self.csrf_headers = {}
         self.history = OrderedDict()
         self.seen = OrderedDict()
         self.members = {}
@@ -123,10 +124,28 @@ class SiteChat:
         async with self.refresh_lock:
             response = await self.http.get("/")
             response.raise_for_status()
-            self.user, csrf = parse_user(response.text)
-            self.http.headers["X-CSRF-TOKEN"] = csrf
+            soup = BeautifulSoup(response.text, "html.parser")
+            self.csrf_headers = {}
+            self.http.headers.pop("X-CSRF-TOKEN", None)
+            self.http.headers.pop("X-XSRF-TOKEN", None)
+            csrf = soup.find("meta", attrs={"name": "csrf-token"})
+            if csrf and csrf.get("content"):
+                self.http.headers["X-CSRF-TOKEN"] = csrf["content"]
+                self.csrf_headers = {"X-CSRF-TOKEN": csrf["content"]}
+            else:
+                xsrf = self.http.cookies.get("XSRF-TOKEN")
+                if xsrf:
+                    xsrf = unquote(xsrf)
+                    self.http.headers.pop("X-CSRF-TOKEN", None)
+                    self.http.headers["X-XSRF-TOKEN"] = xsrf
+                    self.csrf_headers = {"X-XSRF-TOKEN": xsrf}
+
+            try:
+                self.user, _ = parse_user(response.text)
+            except RuntimeError:
+                self.user = await self.user_from_echoes()
+
             if not self.ws_host:
-                soup = BeautifulSoup(response.text, "html.parser")
                 script = next(
                     (
                         s["src"]
@@ -135,18 +154,34 @@ class SiteChat:
                     ),
                     None,
                 )
-                if not script:
-                    raise RuntimeError(
-                        "Não encontrei o script de configuração do chat."
+                if script:
+                    response = await self.http.get(urljoin(self.base_url, script))
+                    response.raise_for_status()
+                    match = re.search(
+                        r'broadcaster:"socket\.io",host:"([^"]+)"', response.text
                     )
-                response = await self.http.get(urljoin(self.base_url, script))
-                response.raise_for_status()
-                match = re.search(
-                    r'broadcaster:"socket\.io",host:"([^"]+)"', response.text
-                )
-                if not match:
-                    raise RuntimeError("Configuração Socket.IO não encontrada no site.")
-                self.ws_host = match[1]
+                    if match:
+                        self.ws_host = match[1]
+                # Algumas instalações UNIT3D servem o chat por Socket.IO no
+                # próprio domínio e não expõem o bundle de configuração no HTML.
+                if not self.ws_host:
+                    self.ws_host = self.base_url
+
+    async def user_from_echoes(self):
+        """Obter a conta autenticada pela API comum do chat UNIT3D."""
+        response = await self.http.get("/api/chat/echoes")
+        response.raise_for_status()
+        try:
+            rows = response.json().get("data", [])
+        except (ValueError, AttributeError):
+            rows = []
+        for row in rows:
+            user = row.get("user") if isinstance(row, dict) else None
+            if isinstance(user, dict) and user.get("id") and user.get("username"):
+                return user
+        raise RuntimeError(
+            "Não consegui identificar a conta pela API do chat; confira os cookies."
+        )
 
     async def load_room(self, deliver=True):
         rooms = (await self.request("GET", "/api/chat/rooms"))["data"]
@@ -479,7 +514,7 @@ class SiteChat:
                             "channel": channel,
                             "auth": {
                                 "headers": {
-                                    "X-CSRF-TOKEN": self.http.headers["X-CSRF-TOKEN"],
+                                    **self.csrf_headers,
                                     "Cookie": self.cookie_header(),
                                 }
                             },

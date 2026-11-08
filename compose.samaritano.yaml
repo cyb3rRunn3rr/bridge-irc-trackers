@@ -1,0 +1,30 @@
+services:
+  samaritano-bridge:
+    image: ghcr.io/cyb3rrunn3rr/bridge-irc-trackers:latest
+    container_name: samaritano-bridge
+    user: "0:0"
+    restart: unless-stopped
+    command:
+      - "--cookies"
+      - "/run/secrets/samaritano.txt"
+      - "--bind"
+      - "0.0.0.0"
+      - "--base-url"
+      - "https://samaritano.cc"
+      - "--channel"
+      - "#samaritano"
+      - "--server-name"
+      - "samaritano.local"
+      - "--tracker-name"
+      - "Samaritano"
+      - "--tracker-id"
+      - "samaritano"
+      - "--sticker-names"
+      - "/app/figurinhas-samaritano.json"
+      - "--sticker-base-url"
+      - "http://samaritano-bridge:6668"
+    volumes:
+      - ./secrets/samaritano.txt:/run/secrets/samaritano.txt:ro
+    expose:
+      - "6667"
+      - "6668"

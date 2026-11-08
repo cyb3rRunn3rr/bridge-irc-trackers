@@ -1,9 +1,9 @@
-# CapybaraBR → IRC local
+# Bridge IRC para trackers UNIT3D
 
-Bridge Python entre a sala `General` do CapybaraBR e o canal IRC `#capybara`.
-O Halloy conecta a um servidor local em `127.0.0.1:6667`. As mensagens enviadas
-ao canal são publicadas com a conta autenticada pelos cookies.
-O nickname IRC não muda a identidade da conta no site.
+Bridge Python para conectar chats de trackers UNIT3D a servidores IRC. Cada
+tracker roda em um serviço separado e pode ter seu próprio servidor e canal.
+O bridge não altera a identidade da conta no site: as mensagens são publicadas
+com a conta autenticada pelos cookies.
 
 ## Iniciar no Windows
 
@@ -29,28 +29,30 @@ A imagem é publicada no GitHub Container Registry pelo workflow do repositório
 O bridge aceita `--bind 0.0.0.0` para atender outros containers; no uso local,
 o endereço padrão continua sendo `127.0.0.1`.
 
-Para usar junto com o Lurker, copie `compose.lurker.yaml` para a pasta do
-Compose do Lurker. O arquivo espera encontrar os cookies em
-`../capybara-irc-bridge/capybarabr.txt`; essa localização pode ser alterada
-pela variável `CAPYBARA_COOKIES`. O arquivo de cookies não faz parte da imagem
-nem do repositório.
+O arquivo `compose.yaml` executa o Lurker, o decoder de previews e o bridge do
+CapybaraBR. O bouncer integrado do Lurker fica ativado com
+`LURKER_BOUNCER_ENABLED=true` na porta `6667`, publicada somente em
+`127.0.0.1` no host. O bridge do CBR usa o canal `#capybarabr`.
 
-No Lurker, configure o servidor IRC como `capybara-bridge`, porta `6667`, sem
-TLS. Os dois serviços compartilham a rede padrão do Compose.
-
-Como o repositório e a imagem são privados, autentique o Podman no GHCR no
-servidor antes de iniciar o Compose. Quando o Podman solicitar a senha, informe
-um token do GitHub com permissão de leitura de pacotes (`read:packages`):
+Na pasta do Compose, crie `secrets/` e coloque o export de cookies válido em
+`secrets/capybarabr.txt`. Esses cookies não devem ser enviados ao GitHub. Para
+adicionar o Samaritano, primeiro coloque um export Netscape válido em
+`secrets/samaritano.txt` e inicie também o overlay:
 
 ```sh
-podman login ghcr.io -u SEU_USUARIO_GITHUB
+podman-compose -f compose.yaml -f compose.samaritano.yaml up -d
 ```
 
-Depois, na pasta do Compose do Lurker:
+Sem o overlay, o serviço do Samaritano não é iniciado. No Lurker, crie uma
+conexão IRC para cada tracker usando como servidor `cbr-bridge` ou
+`samaritano-bridge`, porta `6667`, sem TLS. Cada conexão fica separada pelo nome
+da rede no Lurker, incluindo as mensagens privadas.
 
-```sh
-podman-compose up -d
-```
+O bouncer do Lurker usa TLS por padrão. Para conectá-lo a partir de outra
+máquina, mantenha a porta local e crie um túnel SSH, por exemplo
+`ssh -L 6667:127.0.0.1:6667 usuario@servidor`; no cliente IRC use `127.0.0.1`,
+porta `6667`, com TLS ativado. O Lurker mostra os dados de conexão em
+Settings → Bouncer.
 
 ## Halloy
 
@@ -63,7 +65,7 @@ server = "127.0.0.1"
 port = 6667
 use_tls = false
 nickname = "seu_user_igual_do_site"
-channels = ["#capybara"]
+channels = ["#capybarabr"]
 ```
 
 Inicie o bridge antes de conectar o Halloy. O canal mostra as últimas 20
@@ -160,7 +162,7 @@ e encerrados em cada fragmento para não vazar para mensagens seguintes.
 
 ## Mensagem fixada
 
-A mensagem fixada da sala vira o tópico do `#capybara`, por exemplo
+A mensagem fixada da sala vira o tópico do `#capybarabr`, por exemplo
 `CapybaraBR / General | 📌 LoboGuara: trecho da mensagem`, com quem fixou e
 quando. Ao fixar, desafixar ou apagar a fixada no site, o tópico muda na hora
 (o cliente mostra a troca como uma mudança de tópico); fixações feitas com o
@@ -293,7 +295,7 @@ exporte cookies novos, substitua o arquivo e reinicie o bridge.
 # Outra porta (figurinhas em 6669), histórico de 50 mensagens:
 .\start.ps1 --port 6668 --history 50
 
-# Sala System, em vez de General; o canal IRC continua #capybara:
+# Sala System, em vez de General; o canal IRC continua #capybarabr:
 .\start.ps1 --room 2
 
 # Arquivo de cookies diferente:

@@ -1,0 +1,55 @@
+services:
+  lurker:
+    image: ghcr.io/amiantos/lurker:latest
+    container_name: lurker
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8015:8015"
+      - "127.0.0.1:6667:6667"
+    volumes:
+      - ./data:/app/data
+    environment:
+      NODE_ENV: production
+      PORT: "8015"
+      DATABASE_PATH: /app/data/lurker.db
+      LURKER_BOUNCER_ENABLED: "true"
+      LURKER_BOUNCER_PORT: "6667"
+      LURKER_PREVIEWS_URL: http://lurker-previews:8030
+    depends_on:
+      - lurker-previews
+
+  lurker-previews:
+    image: ghcr.io/amiantos/lurker-previews:latest
+    container_name: lurker-previews
+    restart: unless-stopped
+    environment:
+      LURKER_PREVIEWS_ALLOW_PRIVATE: "1"
+
+  cbr-bridge:
+    image: ghcr.io/cyb3rrunn3rr/bridge-irc-trackers:latest
+    container_name: cbr-bridge
+    user: "0:0"
+    restart: unless-stopped
+    command:
+      - "--cookies"
+      - "/run/secrets/capybarabr.txt"
+      - "--bind"
+      - "0.0.0.0"
+      - "--base-url"
+      - "https://capybarabr.com"
+      - "--channel"
+      - "#capybarabr"
+      - "--server-name"
+      - "cbr.local"
+      - "--tracker-name"
+      - "CapybaraBR"
+      - "--tracker-id"
+      - "cbr"
+      - "--sticker-base-url"
+      - "http://cbr-bridge:6668"
+    volumes:
+      - ./secrets/capybarabr.txt:/run/secrets/capybarabr.txt:ro
+    expose:
+      - "6667"
+      - "6668"
+

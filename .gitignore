@@ -3,7 +3,13 @@ __pycache__/
 .inspect/
 *cookies*.txt
 capybarabr.txt
+samaritano.txt
+samaritano-cookies.txt
+secrets/
+cookies/
 *.log
+*.har
+*.har.json
 chat-novo.txt
 .env
 .env.*

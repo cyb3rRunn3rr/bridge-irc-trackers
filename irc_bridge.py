@@ -8,6 +8,7 @@ import hashlib
 import logging
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
 from message_formatting import (
     CONTROL,
@@ -24,8 +25,11 @@ from site_chat import SiteChat, load_sticker_names
 from sticker_server import StickerServer
 from irc_metadata import NickMetadata, group_color
 
-SERVER = "capybara.local"
-CHANNEL = "#capybara"
+SERVER = "cbr.local"
+CHANNEL = "#capybarabr"
+TRACKER_NAME = "CapybaraBR"
+TRACKER_ID = "cbr"
+SITE_HOST = "capybarabr.com"
 CAPS = {"server-time", "echo-message", "message-tags", "batch", "draft/metadata-2", "standard-replies"}
 CAP_VALUES = {"draft/metadata-2": "max-subs=6,max-keys=0,max-value-bytes=0"}
 # Conta de sistema do UNIT3D; o site não permite responder a ela.
@@ -167,7 +171,7 @@ class Client:
         if self.registered or not self.user or self.nick == "*" or self.negotiating:
             return
         self.registered = True
-        await self.numeric(1, f":Bem-vindo ao bridge CapybaraBR, {self.nick}")
+        await self.numeric(1, f":Bem-vindo ao bridge {self.bridge.tracker_name}, {self.nick}")
         await self.numeric(2, f":Seu servidor é {SERVER}")
         await self.numeric(3, ":Servidor IRC local")
         await self.numeric(4, f"{SERVER} 1.0 i n")
@@ -175,7 +179,7 @@ class Client:
             5,
             "CHANTYPES=# CASEMAPPING=rfc1459 NICKLEN=30 CHANMODES=,,,n PREFIX=(ov)@+ CLIENTTAGDENY=*,-draft/react,-draft/unreact,-draft/reply,-reply,-typing :are supported",
         )
-        await self.numeric(375, ":- CapybaraBR IRC bridge -")
+        await self.numeric(375, f":- {self.bridge.tracker_name} IRC bridge -")
         await self.numeric(
             372,
             f":Mensagens em {CHANNEL} são publicadas como {self.bridge.site.user['username']}.",
@@ -259,7 +263,7 @@ class Client:
         if not history and origin is self and "echo-message" not in self.caps:
             return
         if nick not in self.roster and not is_self and not private:
-            await self.write(f":{nick}!site@capybarabr.com JOIN {CHANNEL}")
+            await self.write(f":{nick}!site@{self.bridge.site_host} JOIN {CHANNEL}")
             self.roster.add(nick)
         if 'group' in user:
             await self.metadata.color(nick, group_color(user))
@@ -274,7 +278,7 @@ class Client:
                 reference = self.bridge.message_id(parent, private)
                 tags += f";+reply={reference};+draft/reply={reference}"
         stamp = "@" + tags + " " if tags else ""
-        prefix = f"{stamp}:{nick}!site@capybarabr.com PRIVMSG {target} :"
+        prefix = f"{stamp}:{nick}!site@{self.bridge.site_host} PRIVMSG {target} :"
         chunk_number = 0
         # splitlines() também divide no controle IRC de tachado (0x1e).
         for line in text.split("\n") or ["(mensagem sem texto)"]:
@@ -289,7 +293,7 @@ class Client:
                         if tag and tag.partition("=")[0] != "msgid"
                     )
                     fragment_stamp = "@" + fragment_tags + " " if fragment_tags else ""
-                    fragment_prefix = f"{fragment_stamp}:{nick}!site@capybarabr.com PRIVMSG {target} :"
+                    fragment_prefix = f"{fragment_stamp}:{nick}!site@{self.bridge.site_host} PRIVMSG {target} :"
                 await self.write(fragment_prefix + chunk)
                 chunk_number += 1
         self.delivered.add(int(message["id"]))
@@ -312,7 +316,7 @@ class Client:
         tag = "+draft/unreact" if remove else "+draft/react"
         reference = self.bridge.message_id(mid)
         tags = f"+reply={reference};+draft/reply={reference};{tag}={escape_tag(emoji)}"
-        await self.write(f"@{tags} :{nick}!site@capybarabr.com TAGMSG {CHANNEL}")
+        await self.write(f"@{tags} :{nick}!site@{self.bridge.site_host} TAGMSG {CHANNEL}")
 
     async def react_command(self, args, tags):
         if (
@@ -321,11 +325,14 @@ class Client:
             or not args
             or irc_fold(args[0]) != CHANNEL
         ):
-            await self.notice("Reações exigem message-tags e entrada em #capybara.")
+            await self.notice(f"Reações exigem message-tags e entrada em {CHANNEL}.")
             return
         react, unreact = tags.get("+draft/react"), tags.get("+draft/unreact")
         reply = tags.get("+reply") or tags.get("+draft/reply")
-        match = re.fullmatch(rf"cbr-{self.bridge.site.room}-(\d+)", reply or "")
+        match = re.fullmatch(
+            rf"{re.escape(self.bridge.tracker_id)}-{self.bridge.site.room}-(\d+)",
+            reply or "",
+        )
         emoji = react if react is not None else unreact
         if (
             (react is None) == (unreact is None)
@@ -520,7 +527,10 @@ class Client:
                     parent = None
                     if reference:
                         kind = "dm" if receiver else str(self.bridge.site.room)
-                        match = re.fullmatch(rf"cbr-{kind}-(\d+)", reference)
+                        match = re.fullmatch(
+                            rf"{re.escape(self.bridge.tracker_id)}-{kind}-(\d+)",
+                            reference,
+                        )
                         if "message-tags" not in self.caps or not match:
                             await self.notice(
                                 "Reply inválido: selecione uma mensagem recebida nesta conversa."
@@ -593,7 +603,7 @@ class Client:
         elif command == "WHO":
             for nick in sorted(self.bridge.names(self)):
                 await self.numeric(
-                    352, f"{CHANNEL} site capybarabr.com {SERVER} {nick} H :0 {nick}"
+                    352, f"{CHANNEL} site {self.bridge.site_host} {SERVER} {nick} H :0 {nick}"
                 )
             await self.numeric(315, f"{CHANNEL} :End of WHO list")
         elif command == "LIST":
@@ -631,10 +641,21 @@ class Client:
 
 
 class IRCBridge:
-    def __init__(self, site, history_count=20, stickers=None):
+    def __init__(
+        self,
+        site,
+        history_count=20,
+        stickers=None,
+        tracker_name=TRACKER_NAME,
+        tracker_id=TRACKER_ID,
+        site_host=SITE_HOST,
+    ):
         self.site = site
         self.history_count = history_count
         self.stickers = stickers
+        self.tracker_name = tracker_name
+        self.tracker_id = tracker_id
+        self.site_host = site_host
         self.clients = set()
         self.tasks = set()
         self.nick_map = {}
@@ -650,7 +671,7 @@ class IRCBridge:
 
     def topic(self):
         """Tópico do canal: nome da sala e a mensagem fixada, se houver."""
-        text = f"CapybaraBR / {self.site.room_name}"
+        text = f"{self.tracker_name} / {self.site.room_name}"
         pinned = self.site.pinned
         if not pinned:
             return safe(text), None, None
@@ -669,7 +690,7 @@ class IRCBridge:
 
     async def pin(self, pinned):
         text, setter, _ = self.topic()
-        source = f"{setter}!site@capybarabr.com" if setter else SERVER
+        source = f"{setter}!site@{self.site_host}" if setter else SERVER
 
         await self.fanout(lambda c: c.write(f":{source} TOPIC {CHANNEL} :{text}"))
 
@@ -679,7 +700,7 @@ class IRCBridge:
         nick = self.reaction_nick(username)
         async def update(client):
             if 'message-tags' in client.caps and username != self.site.user['username']:
-                await client.write(f'@+typing=active :{nick}!site@capybarabr.com TAGMSG {CHANNEL}')
+                await client.write(f'@+typing=active :{nick}!site@{self.site_host} TAGMSG {CHANNEL}')
         await self.fanout(update)
 
     async def user_metadata(self, user):
@@ -701,7 +722,7 @@ class IRCBridge:
         return sid
 
     def message_id(self, mid, private=False):
-        return f"cbr-{'dm' if private else self.site.room}-{mid}"
+        return f"{self.tracker_id}-{'dm' if private else self.site.room}-{mid}"
 
     def user_for_nick(self, nick, client):
         """Usuário do site correspondente a um nick de query."""
@@ -837,11 +858,11 @@ class IRCBridge:
         async def update(client):
             names = self.names(client)
             for nick in sorted(names - client.roster):
-                await client.write(f":{nick}!site@capybarabr.com JOIN {CHANNEL}")
+                await client.write(f":{nick}!site@{self.site_host} JOIN {CHANNEL}")
             for nick in sorted(client.roster - names):
                 if nick != client.nick:
                     await client.write(
-                        f":{nick}!site@capybarabr.com PART {CHANNEL} :Saiu do chat"
+                        f":{nick}!site@{self.site_host} PART {CHANNEL} :Saiu do chat"
                     )
             client.roster = names
             if client.metadata.enabled:
@@ -863,7 +884,10 @@ class IRCBridge:
 
 async def run(args):
     site = SiteChat(
-        args.cookies, args.room, sticker_names=load_sticker_names(args.sticker_names)
+        args.cookies,
+        args.room,
+        base_url=args.base_url,
+        sticker_names=load_sticker_names(args.sticker_names),
     )
     tasks = []
     bridge = None
@@ -886,7 +910,14 @@ async def run(args):
             )
             return
         stickers = StickerServer(site, args.http_port, args.sticker_base_url)
-        bridge = IRCBridge(site, args.history, stickers)
+        bridge = IRCBridge(
+            site,
+            args.history,
+            stickers,
+            tracker_name=args.tracker_name,
+            tracker_id=args.tracker_id,
+            site_host=urlparse(args.base_url).hostname or "site",
+        )
         async with await asyncio.start_server(
             stickers.handle, args.bind, args.http_port, limit=4096
         ) as http_server, await asyncio.start_server(
@@ -912,6 +943,7 @@ async def run(args):
 
 
 def main():
+    global SERVER, CHANNEL, TRACKER_NAME, TRACKER_ID, SITE_HOST
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--cookies", type=Path, default=Path(__file__).with_name("capybarabr.txt")
@@ -923,6 +955,11 @@ def main():
         help="Nomes locais das figurinhas, em JSON",
     )
     parser.add_argument("--port", type=int, default=6667)
+    parser.add_argument("--base-url", default="https://capybarabr.com")
+    parser.add_argument("--channel", default="#capybarabr")
+    parser.add_argument("--server-name", default="cbr.local")
+    parser.add_argument("--tracker-name", default="CapybaraBR")
+    parser.add_argument("--tracker-id", default="cbr")
     parser.add_argument(
         "--bind",
         default="127.0.0.1",
@@ -943,6 +980,15 @@ def main():
         help="Verificar autenticação e WebSocket sem publicar mensagens",
     )
     args = parser.parse_args()
+    if not args.channel.startswith("#") or any(c.isspace() for c in args.channel):
+        parser.error("--channel deve começar com # e não pode conter espaços")
+    if not re.fullmatch(r"[a-z0-9_-]{1,16}", args.tracker_id, re.I):
+        parser.error("--tracker-id deve conter apenas letras, números, _ ou -")
+    SERVER = args.server_name
+    CHANNEL = args.channel
+    TRACKER_NAME = args.tracker_name
+    TRACKER_ID = args.tracker_id
+    SITE_HOST = urlparse(args.base_url).hostname or "site"
     if args.http_port is None:
         args.http_port = args.port + 1
     if (

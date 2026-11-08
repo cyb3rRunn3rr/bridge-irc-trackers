@@ -5,6 +5,8 @@ __pycache__
 tests
 *.py[cod]
 *.log
+*.har
+*.har.json
 *.db
 *.sqlite*
 *.env
@@ -12,5 +14,9 @@ tests
 !*.env.example
 *cookies*.txt
 capybarabr.txt
+samaritano.txt
+samaritano-cookies.txt
+secrets
+cookies
 chat-novo.txt
 data
